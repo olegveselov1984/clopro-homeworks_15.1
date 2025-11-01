@@ -18,6 +18,69 @@
  - Создать в VPC subnet с названием public, сетью 192.168.10.0/24.
  - Создать в этой подсети NAT-инстанс, присвоив ему адрес 192.168.10.254. В качестве image_id использовать fd80mrhj8fl2oe87o4e1.
  - Создать в этой публичной подсети виртуалку с публичным IP, подключиться к ней и убедиться, что есть доступ к интернету.
+
+main.tf
+```
+module "vpc-dev" { #название модуля
+  source       = "./vpc-dev" 
+  env_name_network = "VPC" #параметры которые передаем
+  env_name_subnet  = "public" #параметры которые передаем
+  zone = "ru-central1-a"
+  cidr = ["192.168.10.0/24"]
+}
+
+resource "yandex_vpc_route_table" "private_routes" {  #создание роутера (NAT-инстанс)
+  name       = "private-route-table"
+  network_id = module.vpc-dev.network_id   #yandex_vpc_network.default.id
+  static_route {
+    destination_prefix = "0.0.0.0/0"
+    next_hop_address   = "192.168.10.254"
+  }
+}
+
+resource "yandex_compute_instance" "public" {
+  name = "public"
+  resources {
+    cores  = 2
+    memory = 2
+  }
+  boot_disk {
+    initialize_params {
+      image_id = "fd8ondkh1s6iakbqm635"
+    }
+  }
+
+  network_interface {
+    subnet_id = module.vpc-dev.subnet_id #module.vpc-dev.subnet_id #yandex_vpc_subnet.public.id
+    nat       = true
+  }
+  metadata = {
+    user-data          = data.template_file.cloudinit.rendered 
+    serial-port-enable = 1
+  }
+}
+
+#Пример передачи cloud-config в ВМ.(передали путь к yml файлу и переменную!_ssh_public_key)
+data "template_file" "cloudinit" {
+ template = file("./cloud-init.yml")
+   vars = {
+     ssh_public_key = var.ssh_public_key
+   }
+}
+
+
+```
+
+
+<img width="2373" height="188" alt="image" src="https://github.com/user-attachments/assets/f277504c-e5c4-4fd6-81b7-9ebe62665a14" />
+
+<img width="1607" height="439" alt="image" src="https://github.com/user-attachments/assets/0f376734-0296-4200-bd15-5ec4408dd4b5" />
+
+<img width="760" height="813" alt="image" src="https://github.com/user-attachments/assets/26e8d173-cc30-4be1-bf0e-2a183d2a9ecb" />
+
+
+
+
 3. Приватная подсеть.
  - Создать в VPC subnet с названием private, сетью 192.168.20.0/24.
  - Создать route table. Добавить статический маршрут, направляющий весь исходящий трафик private сети в NAT-инстанс.
