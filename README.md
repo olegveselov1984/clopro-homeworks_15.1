@@ -86,6 +86,129 @@ data "template_file" "cloudinit" {
  - Создать route table. Добавить статический маршрут, направляющий весь исходящий трафик private сети в NAT-инстанс.
  - Создать в этой приватной подсети виртуалку с внутренним IP, подключиться к ней через виртуалку, созданную ранее, и убедиться, что есть доступ к интернету.
 
+main.tf
+```
+module "vpc-dev" { #название модуля
+  source       = "./vpc-dev" 
+  env_name_network = "VPC" #параметры которые передаем
+  env_name_subnet  = "public" #параметры которые передаем
+  zone = "ru-central1-a"
+  cidr = ["192.168.10.0/24"]
+  zone2 = "ru-central1-a"
+  env_name_subnet2  = "private" #параметры которые передаем
+  cidr2 = ["192.168.20.0/24"]
+  route_table_id = yandex_vpc_route_table.private_routes.id
+}
+
+resource "yandex_vpc_route_table" "private_routes" {  #создание NAT)
+  name       = "private-route-table"
+  network_id = module.vpc-dev.network_id   #yandex_vpc_network.default.id
+
+  static_route {
+    destination_prefix = "0.0.0.0/0"
+    next_hop_address   = "192.168.10.254"
+  }
+}
+
+resource "yandex_compute_instance" "nat" {
+  name = "nat"
+  resources {
+    cores  = 2
+    memory = 2
+  }
+  boot_disk {
+    initialize_params {
+      image_id = "fd80mrhj8fl2oe87o4e1"
+    }
+  }
+  network_interface {
+    subnet_id = module.vpc-dev.subnet_id #module.vpc-dev.subnet_id #yandex_vpc_subnet.public.id
+    ip_address = "192.168.10.254"
+    nat       = true
+  }
+  metadata = {
+    user-data          = data.template_file.cloudinit.rendered 
+    serial-port-enable = 1
+###################### Раздел для настройки iptables. В моем случае ен нужен. У меня образ с NAT
+#    user-data = <<EOF
+##cloud-config
+#users:
+#  - name: ${var.ssh_user}
+#    groups: sudo
+#    shell: /bin/bash
+#    sudo: 'ALL=(ALL) NOPASSWD:ALL'
+#    ssh_authorized_keys:
+#      - ${file("${var.ssh_public_key}")}
+#
+#runcmd:
+#  - sysctl -w net.ipv4.ip_forward=1
+#  - iptables -t nat -A POSTROUTING -o eth1 -j MASQUERADE
+#EOF
+#######################
+  }
+}
+
+resource "yandex_compute_instance" "public" {
+  name = "public"
+  resources {
+    cores  = 2
+    memory = 2
+  }
+  boot_disk {
+    initialize_params {
+      image_id = "fd8ondkh1s6iakbqm635"
+    }
+  }
+  network_interface {
+    subnet_id = module.vpc-dev.subnet_id #module.vpc-dev.subnet_id #yandex_vpc_subnet.public.id
+    nat       = true
+  }
+  metadata = {
+    user-data          = data.template_file.cloudinit.rendered 
+    serial-port-enable = 1
+  }
+}
+
+resource "yandex_compute_instance" "private" {
+  name = "private"
+  resources {
+    cores  = 2
+    memory = 2
+  }
+  boot_disk {
+    initialize_params {
+      image_id = "fd8ondkh1s6iakbqm635"
+    }
+  }
+  network_interface {
+    subnet_id = module.vpc-dev.private_id #module.vpc-dev.subnet_id #yandex_vpc_subnet.public.id
+  #  nat       = true
+  }
+  metadata = {
+    user-data          = data.template_file.cloudinit.rendered 
+    serial-port-enable = 1
+  }
+}
+
+#Пример передачи cloud-config в ВМ.(передали путь к yml файлу и переменную!_ssh_public_key)
+data "template_file" "cloudinit" {
+ template = file("./cloud-init.yml")
+   vars = {
+     ssh_public_key = var.ssh_public_key
+   }
+}
+
+```
+
+<img width="1351" height="335" alt="image" src="https://github.com/user-attachments/assets/9f263b5c-2d31-4aa6-a94a-43a09a33f3a1" />  
+
+ssh -J ubuntu@51.250.67.91 ubuntu@192.168.20.17  
+
+<img width="914" height="770" alt="image" src="https://github.com/user-attachments/assets/e3555413-c984-4057-a0e0-8d83ea50cfe6" />
+
+
+
+
 Resource Terraform для Yandex Cloud:
 
 - [VPC subnet](https://registry.terraform.io/providers/yandex-cloud/yandex/latest/docs/resources/vpc_subnet).
